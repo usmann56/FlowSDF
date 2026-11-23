@@ -93,7 +93,8 @@ if __name__ == "__main__":
 
     sim_name = f"{cfg.general.modality}"
 
-    with Simulation(sim_name=sim_name, output_root=os.path.join(os.getcwd(), "runs"), suffix=f"seed{args.seed}") as simulation:
+    cfg_name = os.path.splitext(os.path.basename(args.config))[0]
+    with Simulation(sim_name=sim_name, output_root=os.path.join(os.getcwd(), "runs"), suffix=f"{cfg_name}_seed{args.seed}") as simulation:
         writer = SummaryWriter(os.path.join(simulation.outdir, "tensorboard"))
         cfg.inference.load_exp = simulation.outdir.split("/")[-1]
 
