@@ -85,7 +85,7 @@ def load_sample(img_path, xml_path, resize, thresh):
     # rasterise the rescaled polygons instead of resizing a mask, to keep boundaries sharp
     inst = instance_map(read_polygons(xml_path, scale), h, w)
     mask = ((inst > 0) * 255).astype(np.uint8)
-    return img, mask, compute_sdf(inst, thresh), inst.max()
+    return img, mask, compute_sdf(inst, thresh), inst
 
 
 def save(out, split, name, img, mask, sdf):
@@ -111,7 +111,8 @@ def process_split(src_dir, split, out, args):
 
     rows = []
     for name in names:
-        img, mask, sdf, n_nuclei = load_sample(images[name], annots[name], args.resize, args.thresh)
+        img, mask, sdf, inst = load_sample(images[name], annots[name], args.resize, args.thresh)
+        n_nuclei = inst.max()
         h, w = img.shape[:2]
         if split == "train":
             rows.append(save(out, split, name, img, mask, sdf))
