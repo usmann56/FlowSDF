@@ -23,7 +23,12 @@ def config_dl(cfg):
     train_dataset   = DatasetType(cfg.general.data_path, f'{cfg.general.data_path}/{cfg.general.csv_train}', cfg=cfg.general, batch_size=cfg.general.batch_size)
     test_dataset    = DatasetType(cfg.general.data_path, f'{cfg.general.data_path}/{cfg.general.csv_test}', cfg=cfg.general, batch_size=cfg.inference.n_samples, test_mode=True)    
 
-    train_dataloader     = DataLoader(train_dataset, batch_size=cfg.general.batch_size, shuffle=True, drop_last=True)
+    # persistent workers: with only ~2 batches per epoch, re-spawning workers every epoch would cost more than it saves
+    # fork: the transforms are local closures, which other start methods (default from Python 3.14) cannot pickle
+    num_workers = getattr(cfg.general, 'num_workers', 0)
+    train_dataloader     = DataLoader(train_dataset, batch_size=cfg.general.batch_size, shuffle=True, drop_last=True,
+                                      num_workers=num_workers, persistent_workers=num_workers > 0, pin_memory=True,
+                                      multiprocessing_context='fork' if num_workers > 0 else None)
     test_dataloader      = DataLoader(test_dataset, batch_size=cfg.inference.n_samples, shuffle=True, drop_last=False) # TODO: True/False
 
     dbdict = {"train_dl": train_dataloader, "test_dl": test_dataloader}

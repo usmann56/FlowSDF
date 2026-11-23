@@ -15,17 +15,17 @@ from datasets.config_dl import config_dl
 from models import unet_segdiff
 import trainer
 
-# Reproducibility
-SEED = 0
-random.seed(SEED)
-np.random.seed(SEED)
-torch.manual_seed(SEED)
-
 parser = argparse.ArgumentParser("")
 parser.add_argument(
     "--config", default="cfg/monuseg.yaml", type=str, help="path to .yaml config"
 )
+parser.add_argument("--seed", default=0, type=int, help="seed for reproducibility")
 args = parser.parse_args()
+
+# Reproducibility
+random.seed(args.seed)
+np.random.seed(args.seed)
+torch.manual_seed(args.seed)
 
 
 def count_parameters(net):
@@ -63,7 +63,7 @@ if __name__ == "__main__":
         conv_resample=True,
         dims=2,
         num_classes=None,
-        use_checkpoint=False,
+        use_checkpoint=getattr(cfg.model, "use_checkpoint", False),  # gradient checkpointing to save GPU memory
         num_heads=1,
         num_heads_upsample=-1,
         use_scale_shift_norm=False,
@@ -93,7 +93,7 @@ if __name__ == "__main__":
 
     sim_name = f"{cfg.general.modality}"
 
-    with Simulation(sim_name=sim_name, output_root=os.path.join(os.getcwd(), "runs")) as simulation:
+    with Simulation(sim_name=sim_name, output_root=os.path.join(os.getcwd(), "runs"), suffix=f"seed{args.seed}") as simulation:
         writer = SummaryWriter(os.path.join(simulation.outdir, "tensorboard"))
         cfg.inference.load_exp = simulation.outdir.split("/")[-1]
 
@@ -109,6 +109,7 @@ if __name__ == "__main__":
                 val_dl=train_dl,
                 ema_decay=cfg.learning.ema_decay,
                 thresh=cfg.inference.thresh,
+                amp=getattr(cfg.learning, "amp", False),
             ).do(
                 model,
                 train_dl,

@@ -17,7 +17,7 @@ general:
 
 model:
   n_cin: 1 # 1, n_classes for multi-class segmentation
-  n_fm: 128  '
+  n_fm: 128
   mults:
     - 1
     - 1

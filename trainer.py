@@ -23,12 +23,13 @@ def update_ema_variables(model, ema_model, ema_decay):
 
 
 class TrainFlow:
-    def __init__(self, fm_type, sigma_min, ode_steps, n_val, val_dl, ema_decay, thresh):
+    def __init__(self, fm_type, sigma_min, ode_steps, n_val, val_dl, ema_decay, thresh, amp=False):
         self.fm_type = fm_type
         self.sigma_min = sigma_min
         self.ode_steps = ode_steps
         self.ema_decay = ema_decay
         self.thresh = thresh
+        self.amp = amp  # bf16 mixed precision for the training forward pass
 
         batch_val = next(iter(val_dl))
         self.x_val = batch_val['image'][:n_val]
@@ -62,9 +63,10 @@ class TrainFlow:
                 mt = mu_t + sigma_t[:, None, None, None] * eta
 
                 u = (m - (1 - self.sigma_min) * mt) / (1 - (1 - self.sigma_min) * t[:, None, None, None])
-                v = net(mt, t.reshape(n, -1), img_cond=x)
+                with torch.autocast(device.type, dtype=torch.bfloat16, enabled=self.amp):
+                    v = net(mt, t.reshape(n, -1), img_cond=x)
 
-                loss = ((v - u) ** 2).mean()
+                loss = ((v.float() - u) ** 2).mean()
 
                 optim.zero_grad()
                 loss.backward()
@@ -96,7 +98,10 @@ class TrainFlow:
                     return ema_model(m_ipt, t_curr.reshape(m_.shape[0], -1), img_cond=self.x_val.to(m0.device))
 
                 with torch.no_grad():
-                    traj = odeint(func_conditional, m0, torch.linspace(0, 1, self.ode_steps, device=device))
+                    # fixed-step euler as in sampler.py; the default adaptive solver (dopri5) can take
+                    # thousands of steps near t=1 and stall training
+                    traj = odeint(func_conditional, m0, torch.linspace(0, 1, self.ode_steps, device=device),
+                                  method='euler')
 
                 sample = traj[-1]
                 if len(torch.unique(m)) == 2:
@@ -117,7 +122,8 @@ class TrainFlow:
                 simulation.save_pytorch(checkpoint, overwrite=False, subdir='models_sanity',
                                         epoch='_' + '{0:07}'.format(epoch))
 
-            if best_loss > epoch_loss or epoch == n_epochs - 1:
+            # only check for a new best every 100 epochs: each save writes ~2 GB (model + optimizer)
+            if (epoch % 100 == 0 and best_loss > epoch_loss) or epoch == n_epochs - 1:
                 best_loss = epoch_loss
                 cp_dir = os.path.join(simulation._outdir, 'models')
                 if epoch > 0 and os.path.exists(cp_dir):

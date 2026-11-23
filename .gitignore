@@ -1,2 +1,5 @@
 *pycache*
 *DS_Store*
+runs/
+logs/
+*.pt

@@ -159,6 +159,10 @@ class CheckpointFunction(th.autograd.Function):
         ctx.run_function = run_function
         ctx.input_tensors = list(args[:length])
         ctx.input_params = list(args[length:])
+        # remember autocast state so the recomputation in backward matches the forward pass
+        ctx.device_type = ctx.input_tensors[0].device.type
+        ctx.autocast_enabled = th.is_autocast_enabled(ctx.device_type)
+        ctx.autocast_dtype = th.get_autocast_dtype(ctx.device_type)
         with th.no_grad():
             output_tensors = ctx.run_function(*ctx.input_tensors)
         return output_tensors
@@ -166,7 +170,7 @@ class CheckpointFunction(th.autograd.Function):
     @staticmethod
     def backward(ctx, *output_grads):
         ctx.input_tensors = [x.detach().requires_grad_(True) for x in ctx.input_tensors]
-        with th.enable_grad():
+        with th.enable_grad(), th.autocast(ctx.device_type, dtype=ctx.autocast_dtype, enabled=ctx.autocast_enabled):
             # Fixes a bug where the first op in run_function modifies the
             # Tensor storage in place, which is not allowed for detach()'d
             # Tensors.

@@ -59,7 +59,7 @@ class MoNuSegDataset(Dataset):
             'left': left,
             'hflip': np.random.rand(),
             'vflip': np.random.rand(),
-            'crop_': self.crop,
+            'crop_': int(self.crop or img.shape[0] > self.sz or img.shape[1] > self.sz),  # random sz crop from full images
             'h_crop': self.sz,
             'w_crop': self.sz,
             'corr_type': corr_type,
