@@ -20,6 +20,7 @@ parser.add_argument(
     "--config", default="cfg/monuseg.yaml", type=str, help="path to .yaml config"
 )
 parser.add_argument("--seed", default=0, type=int, help="seed for reproducibility")
+parser.add_argument("--init-ckpt", default=None, type=str, help="start from these weights (strict load), e.g. an E1 models_sanity checkpoint")
 args = parser.parse_args()
 
 # Reproducibility
@@ -88,6 +89,10 @@ if __name__ == "__main__":
             strict=False,
         )
         print(f"Loaded model from: {os.path.join(load_path, cp)}")
+
+    if args.init_ckpt:
+        model.load_state_dict(torch.load(args.init_ckpt, map_location=device)["state_dict"])
+        print(f"Initialised from: {args.init_ckpt}")
 
     print(f"\nNetwork has {count_parameters(model)} parameters")
 
