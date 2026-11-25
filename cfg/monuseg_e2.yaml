@@ -1,0 +1,65 @@
+general:
+  modality: monuseg 
+  corr_mode: sdf # sdf, binary
+  img_cond: 1 # condition on image to obtain segmentation mask
+  data_path: "/data/users2/mnizam1/datasets/monuseg_rgb/" # TODO: adapt data path
+  csv_train: "train30.csv"
+  csv_test: "val.csv" # keep the test set out of training-time sampling
+  batch_size: 16 
+  num_workers: 2
+  sz: 128 
+  resume_training: False
+  load_path: ''
+  resume_model_dir: 'models' 
+  resume_cp: None # None or specific cp 
+  class_label_cond: False 
+  num_classes: 0
+  with_class_label_emb: False
+
+model:
+  n_cin: 1 # 1, n_classes for multi-class segmentation
+  n_fm: 128
+  use_checkpoint: False
+  mults:
+    - 1
+    - 1
+    - 2
+    - 2
+    - 4
+    - 4
+
+learning:
+  epochs: 10000
+  lr: 1.0E-4
+  amp: True
+  n_val: 8
+  ema_decay: 0.999
+  clip: 1. # or set to None else
+  gpus:
+    - 1
+
+fm:
+  type: 'ot'
+  sigma_min: 1.0E-5
+
+inference:
+  latest: False
+  load_exp: '' 
+  load_model_dir: 'models' 
+  load_cp: None # None or specific cp
+  n_samples: 4 
+  ode_steps: 4 # NFE
+  thresh: 1.0E-2 # threshold to get binary from SDF
+  n_eval: 1 
+  merge_overlap: True 
+
+boundary:  # see boundary_loss.py
+  weighting: uniform
+  lam: 0.1
+  delta: 5
+  t_min: 0.5
+  k: 6.0
+  gamma: 1.0
+  n_var: 4
+  u_clip: 10.0
+  sdf_trunc: 15.0

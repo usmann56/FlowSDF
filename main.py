@@ -14,6 +14,7 @@ from SimulationHelper.simulation import Simulation
 from datasets.config_dl import config_dl
 from models import unet_segdiff
 import trainer
+from config_utils import apply_overrides
 
 parser = argparse.ArgumentParser("")
 parser.add_argument(
@@ -21,6 +22,8 @@ parser.add_argument(
 )
 parser.add_argument("--seed", default=0, type=int, help="seed for reproducibility")
 parser.add_argument("--init-ckpt", default=None, type=str, help="start from these weights (strict load), e.g. an E1 models_sanity checkpoint")
+parser.add_argument("--set", nargs="*", default=[], metavar="SECTION.KEY=VALUE", help="override config values, e.g. boundary.lam=0.2")
+parser.add_argument("--name", default=None, type=str, help="run folder label (default: config file name)")
 args = parser.parse_args()
 
 # Reproducibility
@@ -39,6 +42,7 @@ if __name__ == "__main__":
         cfg = json.loads(
             json.dumps(yaml_cfg), object_hook=lambda d: SimpleNamespace(**d)
         )
+    apply_overrides(cfg, args.set)
 
     if torch.cuda.is_available():
         device = torch.device("cuda")
@@ -98,7 +102,7 @@ if __name__ == "__main__":
 
     sim_name = f"{cfg.general.modality}"
 
-    cfg_name = os.path.splitext(os.path.basename(args.config))[0]
+    cfg_name = args.name or os.path.splitext(os.path.basename(args.config))[0]
     with Simulation(sim_name=sim_name, output_root=os.path.join(os.getcwd(), "runs"), suffix=f"{cfg_name}_seed{args.seed}") as simulation:
         writer = SummaryWriter(os.path.join(simulation.outdir, "tensorboard"))
         cfg.inference.load_exp = simulation.outdir.split("/")[-1]
@@ -116,6 +120,7 @@ if __name__ == "__main__":
                 ema_decay=cfg.learning.ema_decay,
                 thresh=cfg.inference.thresh,
                 amp=getattr(cfg.learning, "amp", False),
+                boundary=getattr(cfg, "boundary", None),
             ).do(
                 model,
                 train_dl,

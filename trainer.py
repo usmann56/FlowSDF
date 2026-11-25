@@ -15,6 +15,7 @@ from torchdiffeq import odeint
 from SimulationHelper.simulation import Simulation
 from datasets.config_dl import config_dl
 from datasets.transform_factory import inv_normalize, transform_factory
+from boundary_loss import boundary_loss, estimate_variance
 
 def update_ema_variables(model, ema_model, ema_decay):
     with torch.no_grad():
@@ -23,13 +24,14 @@ def update_ema_variables(model, ema_model, ema_decay):
 
 
 class TrainFlow:
-    def __init__(self, fm_type, sigma_min, ode_steps, n_val, val_dl, ema_decay, thresh, amp=False):
+    def __init__(self, fm_type, sigma_min, ode_steps, n_val, val_dl, ema_decay, thresh, amp=False, boundary=None):
         self.fm_type = fm_type
         self.sigma_min = sigma_min
         self.ode_steps = ode_steps
         self.ema_decay = ema_decay
         self.thresh = thresh
         self.amp = amp  # bf16 mixed precision for the training forward pass
+        self.boundary = boundary  # boundary-band loss settings (E2/E3), None for the original loss
 
         batch_val = next(iter(val_dl))
         self.x_val = batch_val['image'][:n_val]
@@ -45,6 +47,7 @@ class TrainFlow:
 
         for epoch in tqdm(range(n_epochs), desc="Training progress", colour="#00ff00"):
             epoch_loss = 0.0
+            epoch_cfm, epoch_bnd, epoch_w = [], [], []
             grad_norms_epoch = []
             start_time = time.time()
 
@@ -63,10 +66,21 @@ class TrainFlow:
                 mt = mu_t + sigma_t[:, None, None, None] * eta
 
                 u = (m - (1 - self.sigma_min) * mt) / (1 - (1 - self.sigma_min) * t[:, None, None, None])
+                bnd = self.boundary
+                # computed before the training forward pass, so it adds no activations to the graph
+                unc_var = estimate_variance(net, m, x, bnd, self.sigma_min, self.amp) \
+                    if bnd is not None and bnd.weighting == 'variance' else None
                 with torch.autocast(device.type, dtype=torch.bfloat16, enabled=self.amp):
                     v = net(mt, t.reshape(n, -1), img_cond=x)
 
-                loss = ((v.float() - u) ** 2).mean()
+                loss_cfm = ((v.float() - u) ** 2).mean()
+                loss = loss_cfm
+                if bnd is not None:
+                    loss_bnd, stats = boundary_loss(bnd, m, mt, t, v, unc_var)
+                    loss = loss_cfm + bnd.lam * loss_bnd
+                    epoch_bnd.append(loss_bnd.item())
+                    epoch_w.append(stats['w_mean'])
+                epoch_cfm.append(loss_cfm.item())
 
                 optim.zero_grad()
                 loss.backward()
@@ -83,8 +97,13 @@ class TrainFlow:
             end_time = time.time()
             elapsed_time = end_time - start_time
 
-            print(f"Epoch {epoch + 1} Loss: {epoch_loss:.8f}, Time: {elapsed_time:.2f}s")
+            extra = f" | cfm {np.mean(epoch_cfm):.6f} boundary {np.mean(epoch_bnd):.6f} w {np.mean(epoch_w):.3f}" if epoch_bnd else ""
+            print(f"Epoch {epoch + 1} Loss: {epoch_loss:.8f}, Time: {elapsed_time:.2f}s{extra}")
             writer.add_scalar('train/epoch_loss', epoch_loss, epoch)
+            if epoch_bnd:
+                writer.add_scalar('train/epoch_loss_cfm', np.mean(epoch_cfm), epoch)
+                writer.add_scalar('train/epoch_loss_boundary', np.mean(epoch_bnd), epoch)
+                writer.add_scalar('train/epoch_weight_mean', np.mean(epoch_w), epoch)
             writer.add_scalar('train/epoch_max_grad', np.asarray(grad_norms_epoch).max(), epoch)
             writer.add_scalar('train/epoch_mean_grad', np.asarray(grad_norms_epoch).mean(), epoch)
 
