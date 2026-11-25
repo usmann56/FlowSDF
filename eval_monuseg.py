@@ -88,7 +88,7 @@ def auroc(score, positive):
     return (ranks[positive].sum() - n_pos * (n_pos + 1) / 2) / (n_pos * n_neg)
 
 
-def image_metrics(pred, gt_inst, var, tol):
+def image_metrics(pred, gt_inst, var, tol, band=5):
     gt = gt_inst > 0
     inter, total = (pred & gt).sum(), pred.sum() + gt.sum()
     union = total - inter
@@ -108,7 +108,11 @@ def image_metrics(pred, gt_inst, var, tol):
         )
     _, pred_inst = cv2.connectedComponents(pred.astype(np.uint8), connectivity=4)
     out["aji"] = aji(gt_inst, pred_inst)
-    out["var_auroc"] = auroc(var.ravel(), (pred != gt).ravel())
+    err = pred != gt
+    out["var_auroc"] = auroc(var.ravel(), err.ravel())
+    # same, restricted to pixels within `band` px of a true nucleus edge (where E2/E3 act)
+    near = cv2.distanceTransform((~boundary(gt)).astype(np.uint8), cv2.DIST_L2, cv2.DIST_MASK_PRECISE) <= band
+    out["var_auroc_band"] = auroc(var[near], err[near])
     return out
 
 
@@ -246,13 +250,13 @@ if __name__ == "__main__":
             pred = mmse <= fg_thresh
             row = {"ckpt": label, "split": args.split, "image": n, **image_metrics(pred, inst, var, args.tol)}
             rows.append(row)
-            print(f"{label} {n}: " + ", ".join(f"{k} {v:.4f}" for k, v in row.items() if isinstance(v, float)), flush=True)
+            print(f"{label} {n}: " + ", ".join(f"{k} {v:.4f}" for k, v in row.items() if isinstance(v, (float, np.floating))), flush=True)
             if not args.no_maps:
                 save_maps(os.path.join(args.out, "maps", label.replace("/", "__")), n, img, inst > 0, pred, mmse, var)
 
     df = pd.DataFrame(rows)
     df.to_csv(os.path.join(args.out, "metrics.csv"), index=False)
-    metric_cols = ["dice", "iou", "hd95", "assd", "bf1", "aji", "var_auroc"]
+    metric_cols = ["dice", "iou", "hd95", "assd", "bf1", "aji", "var_auroc", "var_auroc_band"]
     summary = df.groupby("ckpt")[metric_cols].agg(["mean", "std"])
     summary.to_csv(os.path.join(args.out, "summary.csv"))
     with pd.option_context("display.width", 200, "display.max_columns", None, "display.precision", 4):
