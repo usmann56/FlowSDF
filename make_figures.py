@@ -65,27 +65,42 @@ def fig_threshold(splits, out):
 
 
 def fig_auroc(splits, thresh, out):
-    fig, axes = plt.subplots(1, 2, figsize=(10, 3.8))
-    for ax, m, name in zip(axes, ["var_auroc", "var_auroc_band"], ["whole image", "5 px boundary band"]):
-        width = 0.8 / len(splits)
+    # panels: (variance metric, distance-to-contour baseline drawn as a black dash on each bar, title)
+    panels = [("var_auroc", "dist_auroc", "whole image"),
+              ("var_auroc_band", "dist_auroc_band", "5 px boundary band"),
+              ("var_auroc_strat", None, "at matched distance to contour")]
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+    width = 0.8 / len(splits)
+    for ax, (m, base, name) in zip(axes, panels):
+        drew_base = False
         for k, (title, sm) in enumerate(splits):
             s = sm[np.isclose(sm.thresh, thresh)]
+            if m not in s.columns:
+                continue  # CSV from before these metrics existed
             for i, c in enumerate(CONDS):
-                vals = s[s.cond == c][m].values
+                sc = s[s.cond == c]
+                vals = sc[m].values
                 if len(vals) == 0:
                     continue
                 x = i + (k - (len(splits) - 1) / 2) * width
                 ax.bar(x, vals.mean(), width, color=COLORS[c], alpha=0.55 if k == 0 else 0.95,
                        edgecolor="k", lw=0.5, label=title if i == 0 else None)
                 ax.scatter(np.full(len(vals), x), vals, color="k", s=10, zorder=3)  # seeds
+                if base and base in sc.columns:
+                    ax.hlines(sc[base].mean(), x - width / 2, x + width / 2, color="k", lw=2.5, zorder=4,
+                              label="distance-to-contour baseline" if not drew_base else None)
+                    drew_base = True
         ax.axhline(0.5, color="k", lw=0.8, ls=":")
         ax.set_xticks(range(len(CONDS)), [LABELS[c] for c in CONDS], rotation=15, fontsize=8)
-        ax.set_ylim(0.4, 0.85)
+        ax.set_ylim(0.4, 0.9)
         ax.set_ylabel("AUROC (variance vs error)")
-        ax.set_title(f"Uncertainty quality, {name}")
+        ax.set_title(f"Uncertainty quality, {name}", fontsize=10)
         ax.grid(axis="y", alpha=0.3)
-    axes[0].legend(fontsize=8)
-    fig.tight_layout()
+    axes[2].text(0.98, 0.02, "0.5 = variance adds nothing\nbeyond contour proximity", transform=axes[2].transAxes,
+                 ha="right", va="bottom", fontsize=7)
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=len(labels), fontsize=8, frameon=False)
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
     fig.savefig(out, dpi=200)
     plt.close(fig)
 
