@@ -20,7 +20,8 @@ import pandas as pd
 from eval_monuseg import image_metrics
 from preprocess_data.preprocess_monuseg import find_files, load_sample
 
-METRICS = ["dice", "iou", "hd95", "assd", "bf1", "aji", "var_auroc", "var_auroc_band"]
+METRICS = ["dice", "iou", "hd95", "assd", "bf1", "aji", "var_auroc", "var_auroc_band",
+           "dist_auroc", "dist_auroc_band", "var_auroc_strat"]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -48,7 +49,7 @@ if __name__ == "__main__":
                 maps = np.load(f)
                 mmse, var = maps["mmse"].astype(np.float32), maps["var"].astype(np.float32)
                 for thr in args.thresholds:
-                    m = image_metrics(mmse <= thr, gt_cache[name], var, ev["tol"], args.band)
+                    m = image_metrics(mmse <= thr, gt_cache[name], var, ev["tol"], args.band, mmse=mmse, thresh=thr)
                     rows.append({"eval": os.path.basename(os.path.normpath(d)), "ckpt": os.path.basename(ck_dir),
                                  "image": name, "thresh": thr, **m})
         print(f"scored {d}", flush=True)
@@ -59,6 +60,6 @@ if __name__ == "__main__":
     # mean over images, then over checkpoints (seeds)
     per_ckpt = df.groupby(["eval", "ckpt", "thresh"])[METRICS].mean()
     summary = per_ckpt.groupby(["eval", "thresh"]).mean()
-    with pd.option_context("display.width", 200, "display.max_columns", None, "display.precision", 4):
+    with pd.option_context("display.width", 250, "display.max_columns", None, "display.precision", 4):
         print("\nmean over images and checkpoints:\n", summary)
     print(f"\nwrote {out}")

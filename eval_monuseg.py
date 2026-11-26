@@ -88,7 +88,7 @@ def auroc(score, positive):
     return (ranks[positive].sum() - n_pos * (n_pos + 1) / 2) / (n_pos * n_neg)
 
 
-def image_metrics(pred, gt_inst, var, tol, band=5):
+def image_metrics(pred, gt_inst, var, tol, band=5, mmse=None, thresh=None, sdf_trunc=15.0):
     gt = gt_inst > 0
     inter, total = (pred & gt).sum(), pred.sum() + gt.sum()
     union = total - inter
@@ -113,7 +113,31 @@ def image_metrics(pred, gt_inst, var, tol, band=5):
     # same, restricted to pixels within `band` px of a true nucleus edge (where E2/E3 act)
     near = cv2.distanceTransform((~boundary(gt)).astype(np.uint8), cv2.DIST_L2, cv2.DIST_MASK_PRECISE) <= band
     out["var_auroc_band"] = auroc(var[near], err[near])
+    if mmse is not None:
+        # trivial baseline: closeness to the predicted contour (|mmse - thresh| ~ distance / sdf_trunc)
+        dist = np.abs(mmse - thresh) * sdf_trunc  # ~ px to the predicted contour
+        out["dist_auroc"] = auroc(-dist.ravel(), err.ravel())
+        out["dist_auroc_band"] = auroc(-dist[near], err[near])
+        out["var_auroc_strat"] = stratified_auroc(var, err, dist)
     return out
+
+
+def stratified_auroc(score, positive, dist, width=0.25, max_dist=15.0):
+    """AUROC of `score` within narrow bins (`width` px) of distance to the predicted contour, pooled over
+    bins (weighted by positive x negative pairs). ~0.5 = the score carries no information about errors
+    beyond contour proximity; above 0.5 = it finds errors that proximity alone does not explain."""
+    bins = np.floor(np.minimum(dist, max_dist) / width).astype(int).ravel()
+    s, p = score.ravel(), positive.ravel()
+    num = den = 0.0
+    for b in np.unique(bins):
+        sel = bins == b
+        n_pos = p[sel].sum()
+        pairs = n_pos * (sel.sum() - n_pos)
+        if pairs == 0:
+            continue
+        num += auroc(s[sel], p[sel]) * pairs
+        den += pairs
+    return num / den if den else np.nan
 
 
 # --------------------- sampling ---------------------
@@ -248,7 +272,7 @@ if __name__ == "__main__":
             samples = predict_image(net, img, args, cfg, gen, device)
             mmse, var = samples.mean(0), samples.var(0)
             pred = mmse <= fg_thresh
-            row = {"ckpt": label, "split": args.split, "image": n, **image_metrics(pred, inst, var, args.tol)}
+            row = {"ckpt": label, "split": args.split, "image": n, **image_metrics(pred, inst, var, args.tol, mmse=mmse, thresh=fg_thresh)}
             rows.append(row)
             print(f"{label} {n}: " + ", ".join(f"{k} {v:.4f}" for k, v in row.items() if isinstance(v, (float, np.floating))), flush=True)
             if not args.no_maps:
@@ -256,7 +280,7 @@ if __name__ == "__main__":
 
     df = pd.DataFrame(rows)
     df.to_csv(os.path.join(args.out, "metrics.csv"), index=False)
-    metric_cols = ["dice", "iou", "hd95", "assd", "bf1", "aji", "var_auroc", "var_auroc_band"]
+    metric_cols = ["dice", "iou", "hd95", "assd", "bf1", "aji", "var_auroc", "var_auroc_band", "dist_auroc", "dist_auroc_band", "var_auroc_strat"]
     summary = df.groupby("ckpt")[metric_cols].agg(["mean", "std"])
     summary.to_csv(os.path.join(args.out, "summary.csv"))
     with pd.option_context("display.width", 200, "display.max_columns", None, "display.precision", 4):

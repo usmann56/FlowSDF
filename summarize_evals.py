@@ -10,7 +10,7 @@ import os
 
 import pandas as pd
 
-METRICS = ["dice", "iou", "hd95", "assd", "bf1", "aji", "var_auroc", "var_auroc_band"]
+METRICS = ["dice", "iou", "hd95", "assd", "bf1", "aji", "var_auroc", "var_auroc_band", "dist_auroc", "dist_auroc_band", "var_auroc_strat"]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

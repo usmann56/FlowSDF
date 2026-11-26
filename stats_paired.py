@@ -18,7 +18,8 @@ import re
 import numpy as np
 import pandas as pd
 
-METRICS = ["dice", "hd95", "assd", "bf1", "aji", "var_auroc", "var_auroc_band"]
+METRICS = ["dice", "hd95", "assd", "bf1", "aji", "var_auroc", "var_auroc_band", "dist_auroc", "dist_auroc_band",
+           "var_auroc_strat"]
 LOWER_IS_BETTER = {"hd95", "assd"}
 
 
@@ -62,12 +63,13 @@ if __name__ == "__main__":
     parser.add_argument("--compare", nargs="+", default=["e2:e1cont", "e3:e1cont", "e3b:e1cont", "e3:e2", "e3b:e2"],
                         help="condition:reference pairs")
     parser.add_argument("--thresholds", nargs="+", type=float, default=None, help="default: all in the CSV")
-    parser.add_argument("--metrics", nargs="+", default=METRICS)
+    parser.add_argument("--metrics", nargs="+", default=None, help="default: all known metrics in the CSV")
     parser.add_argument("--out", default=None, help="optional CSV for the table")
     args = parser.parse_args()
 
     df = pd.read_csv(args.csv)
     df["cond"] = df["eval"].map(condition)
+    args.metrics = args.metrics or [m for m in METRICS if m in df.columns]
     if args.thresholds is not None:
         df = df[np.isclose(df["thresh"].values[:, None], np.array(args.thresholds)[None]).any(1)]
     # per image: mean over seeds (checkpoints) of each condition
