@@ -22,6 +22,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import yaml
 
 from make_figures import COLORS, LABELS, condition, find_map
 from preprocess_data.preprocess_monuseg import find_files, load_sample
@@ -90,18 +91,44 @@ def read_log(path):
             m = LOG_RE.search(line.decode("utf-8", "ignore"))
             if m:
                 ep, loss, cfm, bnd = m.groups()
-                rows.append((int(ep), float(cfm) if cfm else float(loss), float(bnd) if bnd else np.nan))
-    return pd.DataFrame(rows, columns=["epoch", "cfm", "boundary"]).drop_duplicates("epoch").set_index("epoch")
+                rows.append((int(ep), float(loss), float(cfm) if cfm else np.nan, float(bnd) if bnd else np.nan))
+    return pd.DataFrame(rows, columns=["epoch", "loss", "cfm", "boundary"]).drop_duplicates("epoch").set_index("epoch")
+
+
+def boundary_lam(run_dir):
+    with open(os.path.join(run_dir, "cfg.yaml")) as f:
+        return float((yaml.safe_load(f).get("boundary") or {}).get("lam", 0.0))
+
+
+def loss_scale(logs):
+    """The trainer's 'Loss' is the batch loss x batch size / dataset size; the 'cfm' and 'boundary' columns are
+    not. Recover that factor from runs that log all three: Loss = scale * (cfm + lam * boundary)."""
+    ratios = []
+    for path in logs:
+        d = read_log(path)
+        if d["cfm"].notna().any():
+            lam = boundary_lam(os.path.dirname(path))
+            ratios.append(np.nanmedian(d["loss"] / (d["cfm"] + lam * d["boundary"])))
+    if not ratios:
+        raise RuntimeError("no run logs both Loss and cfm; cannot recover the Loss scale")
+    return float(np.median(ratios))
 
 
 def fig_curves(args):
     fig, axes = plt.subplots(1, 2, figsize=(15, 4.6))
-    for c, pattern in RUNS.items():
-        logs = sorted(glob.glob(os.path.join(args.runs_root, f"*_{pattern}_seed*", "simulate.log")))
+    all_logs = {c: sorted(glob.glob(os.path.join(args.runs_root, f"*_{p}_seed*", "simulate.log"))) for c, p in RUNS.items()}
+    scale = loss_scale([p for v in all_logs.values() for p in v])
+    print(f"Loss = {scale:.4f} x batch loss (used to recover L(CFM) for runs that log only Loss)")
+    for c, logs in all_logs.items():
         if not logs:
-            print(f"no logs for {c} ({pattern})")
+            print(f"no logs for {c} ({RUNS[c]})")
             continue
-        d = pd.concat([read_log(p) for p in logs], axis=1, keys=range(len(logs)))
+        frames = []
+        for p in logs:
+            d = read_log(p)
+            d["cfm"] = d["cfm"].fillna(d["loss"] / scale)
+            frames.append(d)
+        d = pd.concat(frames, axis=1, keys=range(len(logs)))
         for k, m in enumerate(["cfm", "boundary"]):
             series = d.xs(m, axis=1, level=1).mean(axis=1)
             if series.isna().all():
@@ -125,7 +152,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--test-csv", default="runs/eval/test_thresholds.csv")
     parser.add_argument("--test-eval-root", default="runs/eval/test")
-    parser.add_argument("--raw-test-dir", required=True)
+    parser.add_argument("--raw-test-dir", default=None, help="needed unless --curves-only")
     parser.add_argument("--runs-root", default="runs/monuseg")
     parser.add_argument("--conds", nargs=2, default=["e1cont", "e2"])
     parser.add_argument("--images", nargs="+", default=None, help="default: picked by Dice gain at --thresh")
@@ -134,10 +161,12 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--crop", type=int, default=200)
     parser.add_argument("--smooth", type=int, default=200, help="rolling window in epochs for the curves")
+    parser.add_argument("--curves-only", action="store_true", help="skip the gallery")
     parser.add_argument("--out", default="figures")
     args = parser.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
-    g, names = fig_gallery(args)
-    print(f"wrote {g} (images: {', '.join(names)})")
+    if not args.curves_only:
+        g, names = fig_gallery(args)
+        print(f"wrote {g} (images: {', '.join(names)})")
     print(f"wrote {fig_curves(args)}")
